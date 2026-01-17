@@ -1,6 +1,55 @@
 import 'package:flutter/material.dart';
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
 
-void main() {
+
+class Post {
+  String text;
+  String? imagePath;
+  int likes;
+
+  Post({required this.text, this.imagePath, this.likes = 0});
+
+  Map<String, dynamic> toJson() => {
+    'text': text,
+    'imagePath': imagePath,
+    'likes': likes,
+  };
+
+  factory Post.fromJson(Map<String, dynamic> json) {
+    return Post(
+      text: json['text'],
+      imagePath: json['imagePath'],
+      likes: json['likes'],
+    );
+  }
+}
+
+class PostStorage {
+  static const String key = "posts";
+
+  static Future<List<Post>> loadPosts() async {
+    final prefs = await SharedPreferences.getInstance();
+    final data = prefs.getStringList(key) ?? [];
+    return data.map((e) => Post.fromJson(jsonDecode(e))).toList();
+  }
+
+  static Future<void> savePosts(List<Post> posts) async {
+    final prefs = await SharedPreferences.getInstance();
+    final data = posts.map((p) => jsonEncode(p.toJson())).toList();
+    await prefs.setStringList(key, data);
+  }
+}
+List<Post> globalPosts = [];
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Load saved posts from SharedPreferences
+  globalPosts = await PostStorage.loadPosts();
+
   runApp(const MyApp());
 }
 
@@ -172,6 +221,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
+/* ===================== FEED PAGE ===================== */
+
 class FeedPage extends StatefulWidget {
   const FeedPage({super.key});
 
@@ -180,40 +231,110 @@ class FeedPage extends StatefulWidget {
 }
 
 class _FeedPageState extends State<FeedPage> {
-  final List<int> likes = List.generate(10, (_) => 0);
-  final List<bool> liked = List.generate(10, (_) => false);
+  void like(Post post) async {
+    setState(() => post.likes++);
+    await PostStorage.savePosts(globalPosts);
+  }
+
+  void edit(Post post) async {
+    final controller = TextEditingController(text: post.text);
+
+    await showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text("Edit Post"),
+        content: TextField(controller: controller),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              post.text = controller.text;
+              await PostStorage.savePosts(globalPosts);
+              Navigator.pop(context);
+              setState(() {});
+            },
+            child: const Text("Save"),
+          )
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return ListView.builder(
-      itemCount: 10,
-      itemBuilder: (_, i) => Card(
-        margin: const EdgeInsets.all(10),
-        child: ListTile(
-          title: Text("Post #$i"),
-          subtitle: Text("Likes: ${likes[i]}"),
-          trailing: IconButton(
-            icon: Icon(
-              liked[i] ? Icons.favorite : Icons.favorite_border,
-              color: liked[i] ? Colors.red : null,
-            ),
-            onPressed: () {
-              setState(() {
-                liked[i] = !liked[i];
-                liked[i] ? likes[i]++ : likes[i]--;
-              });
-            },
+      itemCount: globalPosts.length,
+      itemBuilder: (_, i) {
+        final post = globalPosts[i];
+        return Card(
+          margin: const EdgeInsets.all(10),
+          child: Column(
+            children: [
+              if (post.imagePath != null)
+                Image.file(File(post.imagePath!), height: 200),
+              ListTile(
+                title: Text(post.text),
+                subtitle: Text("Likes: ${post.likes}"),
+              ),
+              Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.favorite),
+                    onPressed: () => like(post),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.edit),
+                    onPressed: () => edit(post),
+                  ),
+                ],
+              )
+            ],
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
 
 /* ===================== CREATE POST ===================== */
 
-class CreatePostPage extends StatelessWidget {
+class CreatePostPage extends StatefulWidget {
   const CreatePostPage({super.key});
+
+  @override
+  State<CreatePostPage> createState() => _CreatePostPageState();
+}
+
+class _CreatePostPageState extends State<CreatePostPage> {
+  final TextEditingController controller = TextEditingController();
+  File? selectedImage;
+
+  Future<void> pickImage() async {
+    final picker = ImagePicker();
+    final image = await picker.pickImage(source: ImageSource.gallery);
+    if (image != null) {
+      setState(() => selectedImage = File(image.path));
+    }
+  }
+
+  void post() async {
+    if (controller.text.isEmpty && selectedImage == null) return;
+
+    globalPosts.insert(
+      0,
+      Post(
+        text: controller.text,
+        imagePath: selectedImage?.path,
+      ),
+    );
+
+    await PostStorage.savePosts(globalPosts);
+
+    controller.clear();
+    selectedImage = null;
+
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text("Post saved")));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -221,22 +342,23 @@ class CreatePostPage extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
-          const TextField(
+          TextField(
+            controller: controller,
             maxLines: 4,
-            decoration: InputDecoration(
-              hintText: "What's on your mind?",
-              border: OutlineInputBorder(),
-            ),
+            decoration: const InputDecoration(border: OutlineInputBorder()),
           ),
-          const SizedBox(height: 20),
-          ElevatedButton(
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text("Post uploaded")),
-              );
-            },
-            child: const Text("Post"),
-          ),
+          const SizedBox(height: 10),
+          if (selectedImage != null)
+            Image.file(selectedImage!, height: 150),
+          Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.image),
+                onPressed: pickImage,
+              ),
+              ElevatedButton(onPressed: post, child: const Text("Post")),
+            ],
+          )
         ],
       ),
     );
@@ -336,6 +458,8 @@ class ProfilePage extends StatelessWidget {
     );
   }
 }
+
+/* ===================== SETTINGS PAGE ===================== */
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
