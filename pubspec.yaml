@@ -1,0 +1,25 @@
+name: prodigy_fwd_05_social_media_platform
+description: A Social Media Plat6form using Flutter and Firebase
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+    flutter:
+      sdk: flutter
+
+    firebase_core: 2.15.1
+    firebase_auth: 4.7.3
+    cloud_firestore: 4.8.4
+
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+
