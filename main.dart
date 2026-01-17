@@ -43,12 +43,49 @@ class PostStorage {
   }
 }
 List<Post> globalPosts = [];
+class ProfileStorage {
+  static const String usernameKey = "username";
+  static const String bioKey = "bio";
+  static const String imageKey = "profile_image";
+
+  static Future<Map<String, String?>> loadProfile() async {
+    final prefs = await SharedPreferences.getInstance();
+    return {
+      "username": prefs.getString(usernameKey) ?? "Username",
+      "bio": prefs.getString(bioKey) ?? "Bio goes here",
+      "imagePath": prefs.getString(imageKey)
+    };
+  }
+
+  static Future<void> saveProfile({
+    required String username,
+    required String bio,
+    String? imagePath,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(usernameKey, username);
+    await prefs.setString(bioKey, bio);
+    if (imagePath != null) await prefs.setString(imageKey, imagePath);
+  }
+}
+
+// Global profile data
+String globalUsername = "Username";
+String globalBio = "Bio goes here";
+String? globalProfileImage;
+
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Load saved posts from SharedPreferences
+  // Load saved posts
   globalPosts = await PostStorage.loadPosts();
+
+  // Load saved profile
+  final profileData = await ProfileStorage.loadProfile();
+  globalUsername = profileData["username"]!;
+  globalBio = profileData["bio"]!;
+  globalProfileImage = profileData["imagePath"];
 
   runApp(const MyApp());
 }
@@ -81,7 +118,6 @@ class _MyAppState extends State<MyApp> {
     );
   }
 }
-
 
 /* ===================== LOGIN PAGE ===================== */
 
@@ -440,20 +476,102 @@ class NotificationsPage extends StatelessWidget {
 
 /* ===================== PROFILE ===================== */
 
-class ProfilePage extends StatelessWidget {
+class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
 
   @override
+  State<ProfilePage> createState() => _ProfilePageState();
+}
+
+class _ProfilePageState extends State<ProfilePage> {
+  late TextEditingController nameController;
+  late TextEditingController bioController;
+  File? profileImageFile;
+
+  @override
+  void initState() {
+    super.initState();
+    nameController = TextEditingController(text: globalUsername);
+    bioController = TextEditingController(text: globalBio);
+    if (globalProfileImage != null) {
+      profileImageFile = File(globalProfileImage!);
+    }
+  }
+
+  Future<void> pickProfileImage() async {
+    final picker = ImagePicker();
+    final image = await picker.pickImage(source: ImageSource.gallery);
+    if (image != null) {
+      setState(() {
+        profileImageFile = File(image.path);
+      });
+    }
+  }
+
+  void saveProfile() async {
+    globalUsername = nameController.text;
+    globalBio = bioController.text;
+    if (profileImageFile != null) {
+      globalProfileImage = profileImageFile!.path;
+    }
+
+    await ProfileStorage.saveProfile(
+      username: globalUsername,
+      bio: globalBio,
+      imagePath: globalProfileImage,
+    );
+
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text("Profile updated")));
+    setState(() {});
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: const [
-          CircleAvatar(radius: 40, child: Icon(Icons.person, size: 40)),
-          SizedBox(height: 10),
-          Text("Username", style: TextStyle(fontSize: 18)),
-          Text("Bio goes here"),
-        ],
+    return SingleChildScrollView(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Stack(
+              children: [
+                CircleAvatar(
+                  radius: 60,
+                  backgroundImage: profileImageFile != null
+                      ? FileImage(profileImageFile!)
+                      : null,
+                  child: profileImageFile == null
+                      ? const Icon(Icons.person, size: 60)
+                      : null,
+                ),
+                Positioned(
+                  bottom: 0,
+                  right: 0,
+                  child: IconButton(
+                    icon: const Icon(Icons.camera_alt),
+                    onPressed: pickProfileImage,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            TextField(
+              controller: nameController,
+              decoration: const InputDecoration(labelText: "Username"),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: bioController,
+              decoration: const InputDecoration(labelText: "Bio"),
+              maxLines: 2,
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: saveProfile,
+              child: const Text("Save Profile"),
+            ),
+          ],
+        ),
       ),
     );
   }
