@@ -9,13 +9,20 @@ class Post {
   String text;
   String? imagePath;
   int likes;
+  List<String> likedBy; // store list of users who liked
 
-  Post({required this.text, this.imagePath, this.likes = 0});
+  Post({
+    required this.text,
+    this.imagePath,
+    this.likes = 0,
+    List<String>? likedBy,
+  }) : likedBy = likedBy ?? [];
 
   Map<String, dynamic> toJson() => {
     'text': text,
     'imagePath': imagePath,
     'likes': likes,
+    'likedBy': likedBy,
   };
 
   factory Post.fromJson(Map<String, dynamic> json) {
@@ -23,6 +30,7 @@ class Post {
       text: json['text'],
       imagePath: json['imagePath'],
       likes: json['likes'],
+      likedBy: List<String>.from(json['likedBy'] ?? []),
     );
   }
 }
@@ -73,6 +81,31 @@ class ProfileStorage {
 String globalUsername = "Username";
 String globalBio = "Bio goes here";
 String? globalProfileImage;
+class NotificationStorage {
+  static const String key = "notifications";
+
+  static Future<List<String>> loadNotifications() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getStringList(key) ?? [];
+  }
+
+  static Future<void> saveNotifications(List<String> notifications) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(key, notifications);
+  }
+
+  static Future<void> addNotification(String notification) async {
+    final notifications = await loadNotifications();
+    notifications.insert(0, notification); // newest first
+    await saveNotifications(notifications);
+  }
+
+  static Future<void> clearNotifications() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(key);
+  }
+}
+
 
 
 void main() async {
@@ -267,33 +300,83 @@ class FeedPage extends StatefulWidget {
 }
 
 class _FeedPageState extends State<FeedPage> {
+  final ImagePicker picker = ImagePicker();
+
   void like(Post post) async {
-    setState(() => post.likes++);
-    await PostStorage.savePosts(globalPosts);
+    // Only allow once per user
+    if (!post.likedBy.contains(globalUsername)) {
+      post.likes++;
+      post.likedBy.add(globalUsername);
+
+      // Add a notification
+      NotificationStorage.addNotification("Your post was liked by $globalUsername");
+
+      await PostStorage.savePosts(globalPosts);
+      setState(() {});
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("You already liked this post")));
+    }
   }
 
+
   void edit(Post post) async {
-    final controller = TextEditingController(text: post.text);
+    final TextEditingController controller = TextEditingController(text: post.text);
+    File? editedImage = post.imagePath != null ? File(post.imagePath!) : null;
 
     await showDialog(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text("Edit Post"),
-        content: TextField(controller: controller),
-        actions: [
-          TextButton(
-            onPressed: () async {
-              post.text = controller.text;
-              await PostStorage.savePosts(globalPosts);
-              Navigator.pop(context);
-              setState(() {});
-            },
-            child: const Text("Save"),
-          )
-        ],
+      builder: (_) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text("Edit Post"),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(controller: controller),
+              const SizedBox(height: 10),
+              if (editedImage != null)
+                Image.file(editedImage! as File, height: 150),
+              TextButton.icon(
+                icon: const Icon(Icons.image),
+                label: const Text("Change Image"),
+                onPressed: () async {
+                  final picked = await picker.pickImage(source: ImageSource.gallery);
+                  if (picked != null) {
+                    setDialogState(() => editedImage = File(picked.path));
+                  }
+                },
+              ),
+              if (editedImage != null)
+                TextButton(
+                  onPressed: () => setDialogState(() => editedImage = null),
+                  child: const Text("Remove Image"),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                post.text = controller.text;
+                post.imagePath = editedImage?.path;
+                await PostStorage.savePosts(globalPosts);
+                Navigator.pop(context);
+                setState(() {});
+              },
+              child: const Text("Save"),
+            ),
+          ],
+        ),
       ),
     );
   }
+
+  void delete(Post post) async {
+    setState(() => globalPosts.remove(post));
+    await PostStorage.savePosts(globalPosts);
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text("Post deleted")));
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -321,8 +404,12 @@ class _FeedPageState extends State<FeedPage> {
                     icon: const Icon(Icons.edit),
                     onPressed: () => edit(post),
                   ),
+                  IconButton(
+                    icon: const Icon(Icons.delete),
+                    onPressed: () => delete(post),
+                  ),
                 ],
-              )
+              ),
             ],
           ),
         );
@@ -459,20 +546,52 @@ class ChatPage extends StatelessWidget {
 
 /* ===================== NOTIFICATIONS ===================== */
 
-class NotificationsPage extends StatelessWidget {
+class NotificationsPage extends StatefulWidget {
   const NotificationsPage({super.key});
 
   @override
+  State<NotificationsPage> createState() => _NotificationsPageState();
+}
+
+class _NotificationsPageState extends State<NotificationsPage> {
+  List<String> notifications = [];
+
+  @override
+  void initState() {
+    super.initState();
+    load();
+  }
+
+  Future<void> load() async {
+    notifications = await NotificationStorage.loadNotifications();
+    setState(() {});
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return ListView(
-      children: const [
-        ListTile(title: Text("New like on your post")),
-        ListTile(title: Text("New follower")),
-        ListTile(title: Text("Message received")),
+    return Column(
+      children: [
+        Expanded(
+          child: ListView.builder(
+            itemCount: notifications.length,
+            itemBuilder: (_, i) => ListTile(
+              title: Text(notifications[i]),
+            ),
+          ),
+        ),
+        if (notifications.isNotEmpty)
+          ElevatedButton(
+            onPressed: () async {
+              await NotificationStorage.clearNotifications();
+              load();
+            },
+            child: const Text("Clear Notifications"),
+          ),
       ],
     );
   }
 }
+
 
 /* ===================== PROFILE ===================== */
 
@@ -579,20 +698,54 @@ class _ProfilePageState extends State<ProfilePage> {
 
 /* ===================== SETTINGS PAGE ===================== */
 
-class SettingsPage extends StatelessWidget {
+class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  bool privacyEnabled = false; // toggle for privacy
+
+  @override
+  void initState() {
+    super.initState();
+    loadPrivacy();
+  }
+
+  Future<void> loadPrivacy() async {
+    final prefs = await SharedPreferences.getInstance();
+    privacyEnabled = prefs.getBool("privacy") ?? false;
+    setState(() {});
+  }
+
+  Future<void> togglePrivacy(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool("privacy", value);
+    setState(() => privacyEnabled = value);
+  }
 
   @override
   Widget build(BuildContext context) {
     return ListView(
       children: [
-        const ListTile(
-          leading: Icon(Icons.person),
-          title: Text("Account"),
+        ListTile(
+          leading: const Icon(Icons.person),
+          title: const Text("Account"),
+          onTap: () {
+            // navigate to account management or profile page
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ProfilePage()),
+            );
+          },
         ),
-        const ListTile(
-          leading: Icon(Icons.lock),
-          title: Text("Privacy"),
+        SwitchListTile(
+          secondary: const Icon(Icons.lock),
+          title: const Text("Privacy"),
+          value: privacyEnabled,
+          onChanged: togglePrivacy,
         ),
         SwitchListTile(
           secondary: const Icon(Icons.dark_mode),
