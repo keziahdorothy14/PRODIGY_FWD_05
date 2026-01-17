@@ -4,19 +4,35 @@ void main() {
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
+  static final ValueNotifier<ThemeMode> themeNotifier =
+  ValueNotifier(ThemeMode.light);
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'PRODIGY Social Media Platform',
-      theme: ThemeData(primarySwatch: Colors.blue),
-      home: const LoginPage(),
+    return ValueListenableBuilder(
+      valueListenable: MyApp.themeNotifier,
+      builder: (_, ThemeMode mode, __) {
+        return MaterialApp(
+          debugShowCheckedModeBanner: false,
+          title: 'PRODIGY Social Media Platform',
+          theme: ThemeData.light(),
+          darkTheme: ThemeData.dark(),
+          themeMode: mode,
+          home: const LoginPage(),
+        );
+      },
     );
   }
 }
+
 
 /* ===================== LOGIN PAGE ===================== */
 
@@ -156,10 +172,16 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-/* ===================== FEED PAGE ===================== */
-
-class FeedPage extends StatelessWidget {
+class FeedPage extends StatefulWidget {
   const FeedPage({super.key});
+
+  @override
+  State<FeedPage> createState() => _FeedPageState();
+}
+
+class _FeedPageState extends State<FeedPage> {
+  final List<int> likes = List.generate(10, (_) => 0);
+  final List<bool> liked = List.generate(10, (_) => false);
 
   @override
   Widget build(BuildContext context) {
@@ -169,8 +191,19 @@ class FeedPage extends StatelessWidget {
         margin: const EdgeInsets.all(10),
         child: ListTile(
           title: Text("Post #$i"),
-          subtitle: const Text("This is a sample social media post"),
-          trailing: const Icon(Icons.favorite_border),
+          subtitle: Text("Likes: ${likes[i]}"),
+          trailing: IconButton(
+            icon: Icon(
+              liked[i] ? Icons.favorite : Icons.favorite_border,
+              color: liked[i] ? Colors.red : null,
+            ),
+            onPressed: () {
+              setState(() {
+                liked[i] = !liked[i];
+                liked[i] ? likes[i]++ : likes[i]--;
+              });
+            },
+          ),
         ),
       ),
     );
@@ -304,8 +337,6 @@ class ProfilePage extends StatelessWidget {
   }
 }
 
-/* ===================== SETTINGS ===================== */
-
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
 
@@ -313,9 +344,25 @@ class SettingsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListView(
       children: [
-        const ListTile(title: Text("Account")),
-        const ListTile(title: Text("Privacy")),
+        const ListTile(
+          leading: Icon(Icons.person),
+          title: Text("Account"),
+        ),
+        const ListTile(
+          leading: Icon(Icons.lock),
+          title: Text("Privacy"),
+        ),
+        SwitchListTile(
+          secondary: const Icon(Icons.dark_mode),
+          title: const Text("Dark Mode"),
+          value: MyApp.themeNotifier.value == ThemeMode.dark,
+          onChanged: (value) {
+            MyApp.themeNotifier.value =
+            value ? ThemeMode.dark : ThemeMode.light;
+          },
+        ),
         ListTile(
+          leading: const Icon(Icons.logout),
           title: const Text("Logout"),
           onTap: () {
             Navigator.pushAndRemoveUntil(
